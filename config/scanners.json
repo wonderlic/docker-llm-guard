@@ -1,0 +1,222 @@
+{
+  "app": {
+    "name": "LLM Guard API",
+    "log_level": "INFO",
+    "log_json": true,
+    "scan_fail_fast": false,
+    "scan_prompt_timeout": 30,
+    "scan_output_timeout": 30,
+    "lazy_load": true
+  },
+  "rate_limit": {
+    "enabled": false,
+    "limit": "100/minute"
+  },
+  "auth": {
+    "type": "http_bearer",
+    "token": ""
+  },
+  "tracing": {
+    "exporter": "console",
+    "endpoint": ""
+  },
+  "metrics": {
+    "exporter": "prometheus",
+    "endpoint": ""
+  },
+  "input_scanners": [
+    {
+      "type": "Anonymize",
+      "params": {
+        "entity_types": [
+          "PERSON",
+          "EMAIL_ADDRESS",
+          "EMAIL_ADDRESS_RE",
+          "PHONE_NUMBER",
+          "US_SSN",
+          "US_SSN_RE",
+          "CREDIT_CARD",
+          "CREDIT_CARD_RE"
+        ],
+        "use_faker": false,
+        "threshold": 0.75
+      }
+    },
+    {
+      "type": "PromptInjection",
+      "params": {
+        "threshold": 0.92,
+        "match_type": "truncate_head_tail",
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "BanTopics",
+      "params": {
+        "topics": [
+        ],
+        "threshold": 0.8,
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "Toxicity",
+      "params": {
+        "threshold": 0.9,
+        "match_type": "full",
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "Sentiment",
+      "params": {
+        "threshold": -0.3
+      }
+    },
+    {
+      "type": "InvisibleText",
+      "params": {}
+    },
+    {
+      "type": "Language",
+      "params": {
+        "valid_languages": [
+          "en"
+        ],
+        "threshold": 0.6,
+        "match_type": "full",
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "TokenLimit",
+      "params": {
+        "limit": 4096,
+        "encoding_name": "cl100k_base"
+      }
+    },
+    {
+      "type": "BanCompetitors",
+      "params": {
+        "competitors": [ ],
+        "threshold": 0.75,
+        "redact": false
+      }
+    },
+    {
+      "type": "Code",
+      "params": {
+        "languages": [
+
+        ],
+        "is_blocked": true,
+        "threshold": 0.5,
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "Gibberish",
+      "params": {
+        "threshold": 0.97,
+        "match_type": "full",
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "Secrets",
+      "params": {
+        "redact_mode": "all"
+      }
+    }
+  ],
+  "output_scanners": [
+    {
+      "type": "Sensitive",
+      "params": {
+        "entity_types": [
+          "PERSON",
+          "EMAIL_ADDRESS",
+          "EMAIL_ADDRESS_RE",
+          "PHONE_NUMBER",
+          "US_SSN",
+          "US_SSN_RE",
+          "CREDIT_CARD",
+          "CREDIT_CARD_RE"
+        ],
+        "redact": false,
+        "threshold": 0.75
+      }
+    },
+    {
+      "type": "Deanonymize",
+      "params": {
+        "matching_strategy": "exact"
+      }
+    },
+    {
+      "type": "Relevance",
+      "params": {
+        "threshold": 0.2,
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "BanTopics",
+      "params": {
+        "topics": [
+        ],
+        "threshold": 0.8,
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "Toxicity",
+      "params": {
+        "threshold": 0.9,
+        "match_type": "full",
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "Bias",
+      "params": {
+        "threshold": 0.7,
+        "match_type": "sentence",
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "FactualConsistency",
+      "params": {
+        "minimum_score": 0.5,
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "Language",
+      "params": {
+        "valid_languages": [
+          "en"
+        ],
+        "threshold": 0.7,
+        "match_type": "full",
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "MaliciousURLs",
+      "params": {
+        "threshold": 0.75,
+        "model_max_length": 256
+      }
+    },
+    {
+      "type": "Gibberish",
+      "params": {
+        "threshold": 0.97,
+        "match_type": "full",
+        "model_max_length": 256
+      }
+    }
+  ]
+}
