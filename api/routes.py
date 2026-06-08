@@ -16,12 +16,12 @@ from api.models import (
 )
 from api.scanner_cache import (
     SCANNER_CACHE_TTL_SECONDS,
-    request_config_fingerprint,
     scanner_cache,
     scanner_cache_lock,
     scanner_cache_sets,
     scanner_invocations,
 )
+from api.scanner_config import active_scanner_configs, request_config_fingerprint
 from api.scanning import scan_input_scanner, scan_output_scanner
 
 
@@ -47,6 +47,11 @@ def cache_stats() -> CacheStatsResponse:
             {
                 "config_fingerprint": cached_scanner.fingerprint,
                 "direction": cached_scanner.direction,
+                "directions": sorted(
+                    direction
+                    for direction, fingerprints in scanner_cache_sets.items()
+                    if cached_scanner.fingerprint in fingerprints
+                ),
                 "type": cached_scanner.scanner_type,
                 "age_seconds": round(now - cached_scanner.created_at, 3),
                 "idle_seconds": round(now - cached_scanner.last_used_at, 3),
@@ -79,6 +84,7 @@ def scan_prompt_detailed(request: DetailedPromptScanRequest) -> DetailedPromptSc
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Request must include at least one scanner in 'input_scanners'",
         )
+    active_configs = active_scanner_configs(scanner_configs)
 
     sanitized_prompt = request.prompt
     scanner_results: list[ScannerResult] = []
@@ -100,7 +106,7 @@ def scan_prompt_detailed(request: DetailedPromptScanRequest) -> DetailedPromptSc
         sanitized_prompt=sanitized_prompt,
         is_valid=is_valid,
         risk_score=risk_score,
-        config_fingerprint=request_config_fingerprint("input", scanner_configs),
+        config_fingerprint=request_config_fingerprint("input", active_configs),
         cache_ttl_seconds=SCANNER_CACHE_TTL_SECONDS,
         scanners=scanner_results,
     )
@@ -118,6 +124,7 @@ def scan_output_detailed(request: DetailedOutputScanRequest) -> DetailedOutputSc
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Request must include at least one scanner in 'output_scanners'",
         )
+    active_configs = active_scanner_configs(scanner_configs)
 
     sanitized_output = request.output
     scanner_results: list[ScannerResult] = []
@@ -143,7 +150,7 @@ def scan_output_detailed(request: DetailedOutputScanRequest) -> DetailedOutputSc
         sanitized_output=sanitized_output,
         is_valid=is_valid,
         risk_score=risk_score,
-        config_fingerprint=request_config_fingerprint("output", scanner_configs),
+        config_fingerprint=request_config_fingerprint("output", active_configs),
         cache_ttl_seconds=SCANNER_CACHE_TTL_SECONDS,
         scanners=scanner_results,
     )

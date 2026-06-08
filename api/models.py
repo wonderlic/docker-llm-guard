@@ -29,11 +29,13 @@ class ScannerInvocation:
     cache_hit: bool
     scanner: Any
     lock: threading.Lock
+    multi_label: bool = False
 
 
 class RequestScannerConfig(BaseModel):
     type: str
     params: dict[str, Any] = Field(default_factory=dict)
+    active: bool = True
 
 
 class DetailedPromptScanRequest(BaseModel):

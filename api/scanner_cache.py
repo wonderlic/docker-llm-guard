@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import gc
-import hashlib
-import json
 import os
 import threading
 import time
-from typing import Any
 
 from app import scanner as scanner_factory
 from fastapi import HTTPException, status
@@ -14,6 +11,16 @@ from llm_guard.vault import Vault
 
 from api.memory import get_memory_usage_bytes, trim_process_memory
 from api.models import CachedScanner, RequestScannerConfig, ScannerInvocation
+from api.scanner_config import (
+    ban_topics_multi_label,
+    direction_supported_scanner_configs,
+    duplicate_scanner_type,
+    scanner_config_fingerprint,
+    scanner_instantiation_params,
+    scanner_config_payload,
+    scanner_is_active,
+    scanner_supported_in_direction,
+)
 from api.telemetry import tracer
 
 
@@ -24,31 +31,7 @@ scanner_cache_evictor_started = False
 scanner_cache_evictor_lock = threading.Lock()
 scanner_cache: dict[str, CachedScanner] = {}
 scanner_cache_sets: dict[str, set[str]] = {"input": set(), "output": set()}
-
-
-def canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
-
-
-def scanner_config_payload(direction: str, scanner_config: RequestScannerConfig) -> dict[str, Any]:
-    return {
-        "direction": direction,
-        "type": scanner_config.type,
-        "params": scanner_config.params or {},
-    }
-
-
-def scanner_config_fingerprint(direction: str, scanner_config: RequestScannerConfig) -> str:
-    digest = hashlib.sha256(
-        canonical_json(scanner_config_payload(direction, scanner_config)).encode()
-    ).hexdigest()
-    return digest[:16]
-
-
-def request_config_fingerprint(direction: str, scanner_configs: list[RequestScannerConfig]) -> str:
-    payload = [scanner_config_payload(direction, scanner_config) for scanner_config in scanner_configs]
-    digest = hashlib.sha256(canonical_json(payload).encode()).hexdigest()
-    return digest[:16]
+scanner_cache_payloads: dict[str, dict[str, object]] = {}
 
 
 def evict_expired_scanners_locked(now: float) -> int:
@@ -73,20 +56,80 @@ def replace_direction_cache_set_locked(direction: str, fingerprints: list[str]) 
         return 0
 
     evicted_count = 0
-    for fingerprint in cached_fingerprints - requested_fingerprints:
+    removed_fingerprints = cached_fingerprints - requested_fingerprints
+    scanner_cache_sets[direction] = requested_fingerprints
+
+    for fingerprint in removed_fingerprints:
+        if scanner_fingerprint_directions_locked(fingerprint):
+            continue
+
+        scanner_cache_payloads.pop(fingerprint, None)
         if delete_cached_scanner_locked(fingerprint):
             evicted_count += 1
 
-    scanner_cache_sets[direction] = requested_fingerprints
     return evicted_count
 
 
 def delete_cached_scanner_locked(fingerprint: str) -> bool:
     cached_scanner = scanner_cache.pop(fingerprint, None)
+    scanner_cache_payloads.pop(fingerprint, None)
     for fingerprints in scanner_cache_sets.values():
         fingerprints.discard(fingerprint)
 
     return cached_scanner is not None
+
+
+def scanner_fingerprint_directions_locked(fingerprint: str) -> list[str]:
+    return sorted(
+        direction
+        for direction, fingerprints in scanner_cache_sets.items()
+        if fingerprint in fingerprints
+    )
+
+
+def validate_unique_scanner_types(scanner_configs: list[RequestScannerConfig]) -> None:
+    duplicate_type = duplicate_scanner_type(scanner_configs)
+    if duplicate_type is None:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "message": "Request must include at most one scanner of each type",
+            "scanner_type": duplicate_type,
+        },
+    )
+
+
+def validate_scanner_params(scanner_configs: list[RequestScannerConfig]) -> None:
+    for scanner_config in scanner_configs:
+        try:
+            ban_topics_multi_label(scanner_config)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "message": str(exc),
+                    "scanner_type": scanner_config.type,
+                },
+            ) from exc
+
+
+def validate_direction_support(direction: str, scanner_configs: list[RequestScannerConfig]) -> None:
+    for scanner_config in scanner_configs:
+        if scanner_supported_in_direction(direction, scanner_config):
+            continue
+        if not scanner_is_active(scanner_config):
+            continue
+
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Scanner type is not supported for this direction",
+                "direction": direction,
+                "scanner_type": scanner_config.type,
+            },
+        )
 
 
 def collect_evicted_scanners(evicted_count: int) -> None:
@@ -154,7 +197,7 @@ def get_cached_scanner(direction: str, scanner_config: RequestScannerConfig) -> 
             ):
                 scanner = scanner_factory_method(
                     scanner_config.type,
-                    dict(scanner_config.params or {}),
+                    scanner_instantiation_params(scanner_config),
                     vault=Vault(),
                 )
             memory_after = get_memory_usage_bytes()
@@ -193,9 +236,18 @@ def scanner_invocations(
     direction: str,
     scanner_configs: list[RequestScannerConfig],
 ) -> list[ScannerInvocation]:
+    validate_unique_scanner_types(scanner_configs)
+    validate_scanner_params(scanner_configs)
+    validate_direction_support(direction, scanner_configs)
+    scanner_configs = direction_supported_scanner_configs(direction, scanner_configs)
     fingerprints = [scanner_config_fingerprint(direction, scanner_config) for scanner_config in scanner_configs]
+    payloads = {
+        fingerprint: scanner_config_payload(direction, scanner_config)
+        for fingerprint, scanner_config in zip(fingerprints, scanner_configs, strict=True)
+    }
     with scanner_cache_lock:
         evicted_count = evict_expired_scanners_locked(time.time())
+        scanner_cache_payloads.update(payloads)
         evicted_count += replace_direction_cache_set_locked(direction, fingerprints)
 
     collect_evicted_scanners(evicted_count)
@@ -204,8 +256,11 @@ def scanner_invocations(
     invocations: list[ScannerInvocation] = []
 
     for index, scanner_config in enumerate(scanner_configs):
-        scanner_counts[scanner_config.type] = scanner_counts.get(scanner_config.type, 0) + 1
         cached_scanner, cache_hit = get_cached_scanner(direction, scanner_config)
+        if not scanner_is_active(scanner_config):
+            continue
+
+        scanner_counts[scanner_config.type] = scanner_counts.get(scanner_config.type, 0) + 1
         invocations.append(
             ScannerInvocation(
                 index=index,
@@ -216,6 +271,7 @@ def scanner_invocations(
                 cache_hit=cache_hit,
                 scanner=cached_scanner.scanner,
                 lock=cached_scanner.lock,
+                multi_label=ban_topics_multi_label(scanner_config),
             )
         )
 

@@ -104,7 +104,15 @@ The response mirrors prompt scanning but returns `sanitized_output`.
 
 ## Scanner Cache
 
-The API fingerprints each individual scanner config from scanner direction, `type`, and `params`. Input and output scanners with the same `type` and `params` are cached separately.
+The API rejects requests that include the same scanner `type` more than once in `input_scanners` or `output_scanners`.
+
+All submitted scanner configs supported by the endpoint direction participate in cache membership and warmup. Only active scanner configs participate in scanning and response fingerprints. The `active` flag itself is not part of the scanner config fingerprint.
+
+Inactive scanner configs for the other direction can be included in a request and are ignored by that endpoint. For example, an inactive output-only `Sensitive` config may be present in `input_scanners`, but it will only warm/cache when sent to the output endpoint. Marking a direction-unsupported scanner active returns `422`.
+
+Direction-agnostic scanner types, such as `BanTopics`, `Toxicity`, `Language`, and `Gibberish`, are fingerprinted from `type` and `params` and cached once across input and output scans when those params match. If the same scanner type arrives later with different params, that direction's cache set is updated to the new fingerprint.
+
+Direction-specific scanner types are fingerprinted from scanner direction, `type`, and `params`, so they remain cached separately.
 
 The cache keeps exactly the scanner set from the most recent prompt scan and the scanner set from the most recent output scan. A later prompt scan replaces only the previous prompt scanner set, and a later output scan replaces only the previous output scanner set. Repeated requests with the same scanner config reuse those scanner instances and return `cache_hit: true`.
 

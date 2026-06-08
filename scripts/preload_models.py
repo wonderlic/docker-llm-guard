@@ -16,6 +16,14 @@ def scanner_names(scanners) -> str:
     return ", ".join(scanner.type for scanner in scanners)
 
 
+def scanner_instantiation_params(scanner) -> dict:
+    params = dict(scanner.params or {})
+    if scanner.type == "BanTopics":
+        params.pop("multi_label", None)
+
+    return params
+
+
 def validate_config(config) -> None:
     unsupported_model_max_length = {
         ("input", "Anonymize"),
@@ -91,7 +99,7 @@ def main() -> int:
         print(f"Preloading input scanner: {scanner.type}", flush=True)
         loaded_scanner = scanner_factory._get_input_scanner(
             scanner.type,
-            dict(scanner.params or {}),
+            scanner_instantiation_params(scanner),
             vault=vault,
         )
         del loaded_scanner
@@ -101,7 +109,7 @@ def main() -> int:
         print(f"Preloading output scanner: {scanner.type}", flush=True)
         loaded_scanner = scanner_factory._get_output_scanner(
             scanner.type,
-            dict(scanner.params or {}),
+            scanner_instantiation_params(scanner),
             vault=vault,
         )
         del loaded_scanner

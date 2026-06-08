@@ -8,7 +8,7 @@ services:
         PRELOAD_MODELS: ${PRELOAD_MODELS:-true}
         RUN_OFFLINE: ${RUN_OFFLINE:-false}
     ports:
-      - "${HOST_APP_PORT:-7800}:8000"
+      - "7800:8000"
     environment:
       APP_NAME: ${APP_NAME:-Detailed LLM Guard API}
       APP_PORT: 8000
