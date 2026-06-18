@@ -53,13 +53,16 @@ Do not commit `.env`; it can contain API keys and auth tokens.
 
 ## Tracing
 
-The custom FastAPI app exports OpenTelemetry traces when `TRACING_EXPORTER=otel_http`. Compose defaults to the local Phoenix sidecar:
+The custom FastAPI app exports OpenTelemetry traces when `TRACING_EXPORTER=otel_http`. Compose defaults to the local open-source Phoenix sidecar:
 
 ```sh
+PHOENIX_API_VERSION=phoenix
 TRACING_EXPORTER=otel_http
 TRACING_OTEL_ENDPOINT=http://phoenix:6006/v1/traces
 OTEL_EXPORTER_OTLP_TRACES_HEADERS=x-project-name=llm-guard
 ```
+
+When `PHOENIX_API_VERSION=phoenix`, the app sends OTLP/HTTP traces to `PHOENIX_TRACING_COLLECTOR_ENDPOINT`, `TRACING_OTEL_ENDPOINT`, or `http://phoenix:6006/v1/traces` in that order. It derives Phoenix-style headers with `authorization=Bearer%20...` when `PHOENIX_API_KEY` is set and ensures `x-project-name` is present.
 
 The app emits FastAPI request spans plus scanner-level spans with scanner direction, scanner type, config fingerprint, cache hit, validity, risk score, and changed status. Prompt and output text are not added to span attributes.
 
@@ -79,11 +82,66 @@ For Arize AX, set these in `.env`:
 ```sh
 PHOENIX_API_VERSION=arize-ax
 PHOENIX_SPACE_ID=U3BhY2U6MjY2MDg6RDMwbg==
+# Alternatively set PHOENIX_SPACE_KEY instead of PHOENIX_SPACE_ID.
 PHOENIX_API_KEY=your-arize-api-key
 PHOENIX_TRACING_PROJECT_NAME=llm-guard
 ```
 
-When `PHOENIX_API_VERSION=arize-ax`, the app sends OTLP/HTTP traces to `https://otlp.arize.com/v1/traces` unless `PHOENIX_TRACING_COLLECTOR_ENDPOINT` is explicitly set. It derives `OTEL_EXPORTER_OTLP_TRACES_HEADERS` with `arize-space-id` and `arize-api-key`, and routes the AX project through the `openinference.project.name` resource attribute.
+When `PHOENIX_API_VERSION=arize-ax`, the app sends OTLP/HTTP traces to `https://otlp.arize.com/v1/traces` unless `PHOENIX_TRACING_COLLECTOR_ENDPOINT` is explicitly set. It derives `OTEL_EXPORTER_OTLP_TRACES_HEADERS` with `arize-space-id` or `arize-space-key` plus `arize-api-key`, and routes the AX project through the `openinference.project.name` resource attribute. If `PHOENIX_API_VERSION=phoenix` points at `https://otlp.arize.com`, startup fails fast because that endpoint requires Arize AX headers.
+
+## Load Testing
+
+Use `scripts/load_test.py` to run a no-dependency load test against the detailed scan API. It supports configurable virtual users, sequential requests per user, linear ramp-up, bearer auth, warm-up requests, progress logs, and summary latency/status/error stats.
+
+```sh
+AUTH_TOKEN=my-token python scripts/load_test.py \
+  --base-url http://localhost:8000 \
+  --users 25 \
+  --requests-per-user 20 \
+  --ramp-up-seconds 60 \
+  --warmup-requests 5
+```
+
+The default payload posts to `/scan/prompt/detailed` with a lightweight `TokenLimit` input scanner. To test a realistic scanner mix, save a detailed scan request body to a JSON file and pass it with `--payload-file`:
+
+```sh
+AUTH_TOKEN=my-token python scripts/load_test.py \
+  --base-url http://localhost:8000 \
+  --payload-file prompt-load-payload.json \
+  --users 50 \
+  --requests-per-user 10 \
+  --ramp-up-seconds 120 \
+  --stats-json load-test-stats.json
+```
+
+With the bundled compose file, use `--base-url http://localhost:7800` unless you change the port mapping. Add `--fail-on-errors` when you want the command to exit non-zero if any measured request returns a non-2xx response or connection error.
+
+The script prints an example `curl` request before it starts so you can inspect the exact URL, headers, and JSON body being sent. Bearer tokens are redacted in the preview; use `--no-curl` to suppress it.
+
+To use the bundled scanner config in `config/load-test-scanners.json`, pass it with `--scanner-config-file`. The script converts `useForInput` scanners into `input_scanners` for prompt scans and `useForOutput` scanners into `output_scanners` for output scans. It also converts top-level `BanTopics.topics` entries into the API's `params.topics` format.
+
+```sh
+AUTH_TOKEN=my-token python scripts/load_test.py \
+  --base-url http://localhost:8000 \
+  --scanner-config-file config/load-test-scanners.json \
+  --users 25 \
+  --requests-per-user 20 \
+  --ramp-up-seconds 60
+```
+
+For output scans, set `--endpoint output` and provide representative `--prompt` and `--output` text:
+
+```sh
+AUTH_TOKEN=my-token python scripts/load_test.py \
+  --endpoint output \
+  --base-url http://localhost:8000 \
+  --scanner-config-file config/load-test-scanners.json \
+  --prompt 'What should candidates know about company policy?' \
+  --output 'Candidates can review the handbook for general company policy details.' \
+  --users 25 \
+  --requests-per-user 20 \
+  --ramp-up-seconds 60
+```
 
 ## Detailed Prompt Scan API
 

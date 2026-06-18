@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from api.health_checks import exclude_health_check_tracing
+
+exclude_health_check_tracing()
+
 from app.otel import instrument_app
 from fastapi import FastAPI
 

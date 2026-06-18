@@ -1,3 +1,4 @@
 .env
 __pycache__/
 *.pyc
+load-test-stats*.json
