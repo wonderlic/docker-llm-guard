@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 load-test-stats*.json
+tests/test_load_test.py
+config/load-test-scanners.json

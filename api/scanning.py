@@ -6,9 +6,27 @@ from typing import Any
 from llm_guard.util import calculate_risk_score
 from opentelemetry.trace import Status, StatusCode
 
+from api.guardrail_trace import update_scanner_trace_title
 from api.models import ScannerInvocation, ScannerResult
 from api.scanner_config import shares_scanner_across_directions
 from api.telemetry import tracer
+
+
+def set_scanner_span_attributes(span: Any, scanner_result: ScannerResult) -> None:
+    span.set_attribute("scanner.is_valid", scanner_result.is_valid)
+    span.set_attribute("scanner.blocked", not scanner_result.is_valid)
+    span.set_attribute("scanner.risk_score", scanner_result.risk_score)
+    if scanner_result.threshold is not None:
+        span.set_attribute("scanner.threshold", scanner_result.threshold)
+
+    effective_score = scanner_result.details.get("effective_score")
+    if effective_score is not None:
+        span.set_attribute("scanner.effective_score", effective_score)
+
+    matched_topic = scanner_result.details.get("matched_topic")
+    if matched_topic:
+        span.set_attribute("scanner.matched_topic", matched_topic)
+        span.set_attribute("scanner.matched_topic_score", scanner_result.details.get("matched_score", 0.0))
 
 
 def finite_float(value: Any, default: float = 0.0) -> float:
@@ -152,10 +170,7 @@ def scan_input_scanner(invocation: ScannerInvocation, prompt: str) -> tuple[str,
             is_valid = bool(is_valid)
             risk_score = finite_risk_score(risk_score, is_valid)
 
-            span.set_attribute("scanner.is_valid", is_valid)
-            span.set_attribute("scanner.risk_score", risk_score)
-            span.set_attribute("scanner.changed", sanitized_prompt != prompt)
-            return sanitized_prompt, ScannerResult(
+            scanner_result = ScannerResult(
                 index=invocation.index,
                 instance_id=invocation.instance_id,
                 type=invocation.scanner_type,
@@ -167,10 +182,14 @@ def scan_input_scanner(invocation: ScannerInvocation, prompt: str) -> tuple[str,
                 threshold=threshold,
                 details=details,
             )
+            set_scanner_span_attributes(span, scanner_result)
+            span.set_attribute("scanner.changed", scanner_result.changed)
+            update_scanner_trace_title(span, scanner_result)
+            return sanitized_prompt, scanner_result
         except Exception as exc:
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR, str(exc)))
-            return prompt, ScannerResult(
+            scanner_result = ScannerResult(
                 index=invocation.index,
                 instance_id=invocation.instance_id,
                 type=invocation.scanner_type,
@@ -182,6 +201,9 @@ def scan_input_scanner(invocation: ScannerInvocation, prompt: str) -> tuple[str,
                 threshold=threshold,
                 error=str(exc),
             )
+            set_scanner_span_attributes(span, scanner_result)
+            update_scanner_trace_title(span, scanner_result)
+            return prompt, scanner_result
 
 
 def scan_output_scanner(
@@ -219,10 +241,7 @@ def scan_output_scanner(
             is_valid = bool(is_valid)
             risk_score = finite_risk_score(risk_score, is_valid)
 
-            span.set_attribute("scanner.is_valid", is_valid)
-            span.set_attribute("scanner.risk_score", risk_score)
-            span.set_attribute("scanner.changed", sanitized_output != output)
-            return sanitized_output, ScannerResult(
+            scanner_result = ScannerResult(
                 index=invocation.index,
                 instance_id=invocation.instance_id,
                 type=invocation.scanner_type,
@@ -234,10 +253,14 @@ def scan_output_scanner(
                 threshold=threshold,
                 details=details,
             )
+            set_scanner_span_attributes(span, scanner_result)
+            span.set_attribute("scanner.changed", scanner_result.changed)
+            update_scanner_trace_title(span, scanner_result)
+            return sanitized_output, scanner_result
         except Exception as exc:
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR, str(exc)))
-            return output, ScannerResult(
+            scanner_result = ScannerResult(
                 index=invocation.index,
                 instance_id=invocation.instance_id,
                 type=invocation.scanner_type,
@@ -249,3 +272,6 @@ def scan_output_scanner(
                 threshold=threshold,
                 error=str(exc),
             )
+            set_scanner_span_attributes(span, scanner_result)
+            update_scanner_trace_title(span, scanner_result)
+            return output, scanner_result

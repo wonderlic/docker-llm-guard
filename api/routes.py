@@ -3,8 +3,10 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from opentelemetry import trace
 
 from api.auth import require_bearer_token
+from api.guardrail_trace import set_guardrail_trace_attributes
 from api.memory import get_memory_limit_bytes, get_memory_usage_bytes
 from api.models import (
     CacheStatsResponse,
@@ -101,6 +103,7 @@ def scan_prompt_detailed(request: DetailedPromptScanRequest) -> DetailedPromptSc
         (scanner_result.risk_score for scanner_result in scanner_results),
         default=-1.0,
     )
+    set_guardrail_trace_attributes(trace.get_current_span(), "input", scanner_results)
 
     return DetailedPromptScanResponse(
         sanitized_prompt=sanitized_prompt,
@@ -145,6 +148,7 @@ def scan_output_detailed(request: DetailedOutputScanRequest) -> DetailedOutputSc
         (scanner_result.risk_score for scanner_result in scanner_results),
         default=-1.0,
     )
+    set_guardrail_trace_attributes(trace.get_current_span(), "output", scanner_results)
 
     return DetailedOutputScanResponse(
         sanitized_output=sanitized_output,
