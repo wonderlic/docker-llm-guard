@@ -2,7 +2,11 @@
 
 ARG LLM_GUARD_API_IMAGE=laiyer/llm-guard-api:latest
 
-FROM ${LLM_GUARD_API_IMAGE} AS model-cache
+FROM ${LLM_GUARD_API_IMAGE} AS xet-enabled
+
+RUN python -m pip install --user --no-cache-dir "huggingface_hub[hf_xet]"
+
+FROM xet-enabled AS model-cache
 
 ARG PRELOAD_MODELS=true
 
@@ -28,7 +32,7 @@ RUN --mount=type=cache,target=/home/user/.cache/huggingface-build,uid=1000,gid=1
       printf 'Skipping model preload. Runtime may download models.\n'; \
     fi
 
-FROM ${LLM_GUARD_API_IMAGE}
+FROM xet-enabled
 
 ARG PRELOAD_MODELS=true
 ARG RUN_OFFLINE=false
