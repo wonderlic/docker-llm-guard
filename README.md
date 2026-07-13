@@ -69,13 +69,6 @@ The app emits FastAPI request spans plus scanner-level spans with scanner direct
 
 To verify inbound trace context during debugging, set `TRACE_HEADER_DEBUG=true`. The app will print one JSON line per request with the received `traceparent`, the active OTEL trace/span IDs, and presence flags for `tracestate` and `baggage`. It does not print `tracestate` or `baggage` values.
 
-For Arize AX, set these in `.env`:
-
-```sh
-TRACING_OTEL_ENDPOINT=https://otlp.arize.com/v1/traces
-OTEL_EXPORTER_OTLP_TRACES_HEADERS=arize-space-id=U3BhY2U6MjY2MDg6RDMwbg==,arize-api-key=your-arize-api-key
-```
-
 ## Load Testing
 
 Use `scripts/load_test.py` to run a no-dependency load test against the detailed scan API. It supports configurable virtual users, sequential requests per user, linear ramp-up, bearer auth, warm-up requests, progress logs, and summary latency/status/error stats.
