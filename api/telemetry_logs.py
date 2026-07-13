@@ -10,9 +10,12 @@ TRANSIENT_SPAN_EXPORT_ERROR_FILTER = "transient_span_export_error_filter"
 class TransientSpanExportErrorFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        return not (
-            message.startswith("Transient error ")
-            and "encountered while exporting span batch" in message
+        return not any(
+            (
+                message.startswith("Transient error ")
+                and "encountered while exporting span batch" in message,
+                message == "Exception while exporting Span batch.",
+            )
         )
 
 
