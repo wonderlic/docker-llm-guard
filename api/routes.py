@@ -19,6 +19,7 @@ from api.models import (
     DetailedOutputScanResponse,
     DetailedPromptScanRequest,
     DetailedPromptScanResponse,
+    ScannerInvocation,
     ScannerResult,
 )
 from api.scanner_cache import (
@@ -69,16 +70,11 @@ def streaming_scan_response(events: Iterable[str]) -> StreamingResponse:
     )
 
 
-def scan_prompt_detailed_events(request: DetailedPromptScanRequest) -> Iterator[str]:
-    scanner_configs = request.input_scanners
-    if not scanner_configs:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Request must include at least one scanner in 'input_scanners'",
-        )
-    active_configs = active_scanner_configs(scanner_configs)
-    invocations = scanner_invocations("input", scanner_configs)
-
+def scan_prompt_detailed_events(
+    request: DetailedPromptScanRequest,
+    invocations: list[ScannerInvocation],
+    config_fingerprint: str,
+) -> Iterator[str]:
     sanitized_prompt = request.prompt
     scanner_results: list[ScannerResult] = []
 
@@ -134,23 +130,18 @@ def scan_prompt_detailed_events(request: DetailedPromptScanRequest) -> Iterator[
             sanitized_prompt=sanitized_prompt,
             is_valid=is_valid,
             risk_score=risk_score,
-            config_fingerprint=request_config_fingerprint("input", active_configs),
+            config_fingerprint=config_fingerprint,
             cache_ttl_seconds=SCANNER_CACHE_TTL_SECONDS,
             scanners=scanner_results,
         ),
     )
 
 
-def scan_output_detailed_events(request: DetailedOutputScanRequest) -> Iterator[str]:
-    scanner_configs = request.output_scanners
-    if not scanner_configs:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Request must include at least one scanner in 'output_scanners'",
-        )
-    active_configs = active_scanner_configs(scanner_configs)
-    invocations = scanner_invocations("output", scanner_configs)
-
+def scan_output_detailed_events(
+    request: DetailedOutputScanRequest,
+    invocations: list[ScannerInvocation],
+    config_fingerprint: str,
+) -> Iterator[str]:
     sanitized_output = request.output
     scanner_results: list[ScannerResult] = []
 
@@ -207,7 +198,7 @@ def scan_output_detailed_events(request: DetailedOutputScanRequest) -> Iterator[
             sanitized_output=sanitized_output,
             is_valid=is_valid,
             risk_score=risk_score,
-            config_fingerprint=request_config_fingerprint("output", active_configs),
+            config_fingerprint=config_fingerprint,
             cache_ttl_seconds=SCANNER_CACHE_TTL_SECONDS,
             scanners=scanner_results,
         ),
@@ -305,7 +296,19 @@ def scan_prompt_detailed(request: DetailedPromptScanRequest) -> DetailedPromptSc
     dependencies=[Depends(require_bearer_token)],
 )
 def scan_prompt_detailed_stream(request: DetailedPromptScanRequest) -> StreamingResponse:
-    return streaming_scan_response(scan_prompt_detailed_events(request))
+    scanner_configs = request.input_scanners
+    if not scanner_configs:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Request must include at least one scanner in 'input_scanners'",
+        )
+    active_configs = active_scanner_configs(scanner_configs)
+    invocations = scanner_invocations("input", scanner_configs)
+    config_fingerprint = request_config_fingerprint("input", active_configs)
+
+    return streaming_scan_response(
+        scan_prompt_detailed_events(request, invocations, config_fingerprint)
+    )
 
 
 @router.post(
@@ -359,4 +362,16 @@ def scan_output_detailed(request: DetailedOutputScanRequest) -> DetailedOutputSc
     dependencies=[Depends(require_bearer_token)],
 )
 def scan_output_detailed_stream(request: DetailedOutputScanRequest) -> StreamingResponse:
-    return streaming_scan_response(scan_output_detailed_events(request))
+    scanner_configs = request.output_scanners
+    if not scanner_configs:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Request must include at least one scanner in 'output_scanners'",
+        )
+    active_configs = active_scanner_configs(scanner_configs)
+    invocations = scanner_invocations("output", scanner_configs)
+    config_fingerprint = request_config_fingerprint("output", active_configs)
+
+    return streaming_scan_response(
+        scan_output_detailed_events(request, invocations, config_fingerprint)
+    )

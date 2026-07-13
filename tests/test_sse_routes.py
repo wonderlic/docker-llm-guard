@@ -7,6 +7,8 @@ from threading import Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from fastapi import HTTPException
+
 from api.models import (
     DetailedOutputScanRequest,
     DetailedPromptScanRequest,
@@ -15,7 +17,9 @@ from api.models import (
 )
 from api.routes import (
     scan_output_detailed_events,
+    scan_output_detailed_stream,
     scan_prompt_detailed_events,
+    scan_prompt_detailed_stream,
     sse_event,
     wait_for_future_with_keep_alive,
 )
@@ -81,13 +85,17 @@ class SseRouteTests(unittest.TestCase):
             input_scanners=[{"type": "TokenLimit"}],
         )
 
-        with (
-            patch("api.routes.scanner_invocations", return_value=[invocation("input")]),
-            patch("api.routes.active_scanner_configs", return_value=request.input_scanners),
-            patch("api.routes.request_config_fingerprint", return_value="request-fingerprint"),
-            patch("api.routes.scan_input_scanner", return_value=("hello", scanner_result())),
+        with patch(
+            "api.routes.scan_input_scanner",
+            return_value=("hello", scanner_result()),
         ):
-            events = list(scan_prompt_detailed_events(request))
+            events = list(
+                scan_prompt_detailed_events(
+                    request,
+                    [invocation("input")],
+                    "request-fingerprint",
+                )
+            )
 
         self.assertIn('event: start\ndata: {"scanner_count":1,"direction":"input"}\n\n', events)
         self.assertTrue(events[1].startswith("event: progress\n"))
@@ -111,13 +119,17 @@ class SseRouteTests(unittest.TestCase):
             output_scanners=[{"type": "TokenLimit"}],
         )
 
-        with (
-            patch("api.routes.scanner_invocations", return_value=[invocation("output")]),
-            patch("api.routes.active_scanner_configs", return_value=request.output_scanners),
-            patch("api.routes.request_config_fingerprint", return_value="request-fingerprint"),
-            patch("api.routes.scan_output_scanner", return_value=("world", scanner_result())),
+        with patch(
+            "api.routes.scan_output_scanner",
+            return_value=("world", scanner_result()),
         ):
-            events = list(scan_output_detailed_events(request))
+            events = list(
+                scan_output_detailed_events(
+                    request,
+                    [invocation("output")],
+                    "request-fingerprint",
+                )
+            )
 
         self.assertIn('event: start\ndata: {"scanner_count":1,"direction":"output"}\n\n', events)
         self.assertTrue(events[1].startswith("event: progress\n"))
@@ -133,6 +145,44 @@ class SseRouteTests(unittest.TestCase):
         self.assertTrue(complete_event.startswith("event: complete\n"))
         self.assertIn('"sanitized_output":"world"', complete_event)
         self.assertIn('"config_fingerprint":"request-fingerprint"', complete_event)
+
+    def test_prompt_stream_rejects_empty_scanners_before_creating_response(self) -> None:
+        request = DetailedPromptScanRequest(prompt="hello", input_scanners=[])
+
+        with patch("api.routes.streaming_scan_response") as streaming_scan_response:
+            with self.assertRaises(HTTPException) as raised:
+                scan_prompt_detailed_stream(request)
+
+        self.assertEqual(raised.exception.status_code, 422)
+        streaming_scan_response.assert_not_called()
+
+    def test_output_stream_rejects_empty_scanners_before_creating_response(self) -> None:
+        request = DetailedOutputScanRequest(prompt="hello", output="world", output_scanners=[])
+
+        with patch("api.routes.streaming_scan_response") as streaming_scan_response:
+            with self.assertRaises(HTTPException) as raised:
+                scan_output_detailed_stream(request)
+
+        self.assertEqual(raised.exception.status_code, 422)
+        streaming_scan_response.assert_not_called()
+
+    def test_scanner_preparation_failure_happens_before_creating_response(self) -> None:
+        request = DetailedPromptScanRequest(
+            prompt="hello",
+            input_scanners=[{"type": "Unsupported"}],
+        )
+        preparation_error = HTTPException(status_code=422, detail="Unsupported scanner")
+
+        with (
+            patch("api.routes.active_scanner_configs", return_value=request.input_scanners),
+            patch("api.routes.scanner_invocations", side_effect=preparation_error),
+            patch("api.routes.streaming_scan_response") as streaming_scan_response,
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                scan_prompt_detailed_stream(request)
+
+        self.assertIs(raised.exception, preparation_error)
+        streaming_scan_response.assert_not_called()
 
 
 if __name__ == "__main__":
