@@ -40,6 +40,19 @@ class TelemetryLogTests(unittest.TestCase):
 
         self.assertTrue(TransientSpanExportErrorFilter().filter(record))
 
+    def test_transient_span_export_error_filter_suppresses_export_exception(self) -> None:
+        record = logging.LogRecord(
+            OTLP_HTTP_TRACE_EXPORTER_LOGGER,
+            logging.ERROR,
+            __file__,
+            1,
+            "Exception while exporting Span batch.",
+            (),
+            None,
+        )
+
+        self.assertFalse(TransientSpanExportErrorFilter().filter(record))
+
     def test_suppress_transient_span_export_errors_installs_filter_once(self) -> None:
         suppress_transient_span_export_errors()
         suppress_transient_span_export_errors()

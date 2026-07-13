@@ -53,16 +53,17 @@ Do not commit `.env`; it can contain API keys and auth tokens.
 
 ## Tracing
 
-The custom FastAPI app exports OpenTelemetry traces when `TRACING_EXPORTER=otel_http`. Compose defaults to the local open-source Phoenix sidecar:
+The custom FastAPI app exports OpenTelemetry traces when `TRACING_EXPORTER=otel_http`:
 
 ```sh
-PHOENIX_API_VERSION=phoenix
 TRACING_EXPORTER=otel_http
-TRACING_OTEL_ENDPOINT=http://phoenix:6006/v1/traces
+TRACING_OTEL_ENDPOINT=https://otel-collector.example.test/v1/traces
 OTEL_EXPORTER_OTLP_TRACES_HEADERS=x-project-name=llm-guard
 ```
 
-When `PHOENIX_API_VERSION=phoenix`, the app sends OTLP/HTTP traces to `PHOENIX_TRACING_COLLECTOR_ENDPOINT`, `TRACING_OTEL_ENDPOINT`, or `http://phoenix:6006/v1/traces` in that order. It derives Phoenix-style headers with `authorization=Bearer%20...` when `PHOENIX_API_KEY` is set and ensures `x-project-name` is present.
+The app sends OTLP/HTTP traces to `TRACING_OTEL_ENDPOINT` and uses any `OTEL_EXPORTER_OTLP_TRACES_HEADERS` value as-is. Set endpoint-specific headers explicitly for Phoenix Cloud, Arize AX, or any other OTLP collector.
+
+If `TRACING_OTEL_ENDPOINT` is unset, the underlying OTEL exporter uses its own default endpoint. Set `TRACING_EXPORTER=none` to disable tracing.
 
 The app emits FastAPI request spans plus scanner-level spans with scanner direction, scanner type, config fingerprint, cache hit, validity, risk score, and changed status. Prompt and output text are not added to span attributes.
 
@@ -80,14 +81,9 @@ Use the Hostname from Phoenix Cloud Settings. The generic `https://app.phoenix.a
 For Arize AX, set these in `.env`:
 
 ```sh
-PHOENIX_API_VERSION=arize-ax
-PHOENIX_SPACE_ID=U3BhY2U6MjY2MDg6RDMwbg==
-# Alternatively set PHOENIX_SPACE_KEY instead of PHOENIX_SPACE_ID.
-PHOENIX_API_KEY=your-arize-api-key
-PHOENIX_TRACING_PROJECT_NAME=llm-guard
+TRACING_OTEL_ENDPOINT=https://otlp.arize.com/v1/traces
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=arize-space-id=U3BhY2U6MjY2MDg6RDMwbg==,arize-api-key=your-arize-api-key
 ```
-
-When `PHOENIX_API_VERSION=arize-ax`, the app sends OTLP/HTTP traces to `https://otlp.arize.com/v1/traces` unless `PHOENIX_TRACING_COLLECTOR_ENDPOINT` is explicitly set. It derives `OTEL_EXPORTER_OTLP_TRACES_HEADERS` with `arize-space-id` or `arize-space-key` plus `arize-api-key`, and routes the AX project through the `openinference.project.name` resource attribute. If `PHOENIX_API_VERSION=phoenix` points at `https://otlp.arize.com`, startup fails fast because that endpoint requires Arize AX headers.
 
 ## Load Testing
 
@@ -145,10 +141,13 @@ AUTH_TOKEN=my-token python scripts/load_test.py \
 
 ## Detailed Prompt Scan API
 
-Use `POST /scan/prompt/detailed` to scan a prompt with request-provided input scanners.
-Send `prompt`, `input_scanners`, and optional `fail_fast` in the request body. Each scanner config contains `type`, optional `active`, and `params`.
+Use `POST /scan/prompt/detailed/stream` to scan a prompt with request-provided input scanners over SSE. Send `prompt`, `input_scanners`, and optional `fail_fast` in the request body. Each scanner config contains `type`, optional `active`, and `params`.
 
-The response includes the final `sanitized_prompt`, an overall `is_valid` flag, an overall `risk_score`, an active request `config_fingerprint`, and a `scanners` array. Each scanner result includes `index`, `instance_id`, `type`, `config_fingerprint`, `cache_hit`, `is_valid`, `risk_score`, `changed`, and `threshold` when available.
+The endpoint streams `text/event-stream` responses. It emits `start`, `progress`, `scanner_start`, `scanner_complete`, and final `complete` events. A `progress` event with `status: "queued"` is sent before each scanner starts. Once the scanner is running, `scanner_start` and periodic `progress` events use `status: "running"`. During long scanner calls, `progress` events are emitted every 15 seconds with queue position details: `current`, `total`, `remaining`, `direction`, `instance_id`, `type`, and `cache_hit`.
+
+The final `complete` event data includes the final `sanitized_prompt`, an overall `is_valid` flag, an overall `risk_score`, an active request `config_fingerprint`, and a `scanners` array. Each scanner result includes `index`, `instance_id`, `type`, `config_fingerprint`, `cache_hit`, `is_valid`, `risk_score`, `changed`, and `threshold` when available.
+
+The existing `POST /scan/prompt/detailed` endpoint remains available with its original JSON response for compatibility, but is deprecated in favor of the SSE endpoint.
 
 For `BanTopics`, each scanner result may also include `matched_topic`, `matched_score`, `matched_topics`, `effective_score`, `multi_label`, and per-topic scores.
 
@@ -156,9 +155,11 @@ Set `fail_fast` to `true` in the request body to stop after the first invalid sc
 
 ## Detailed Output Scan API
 
-Use `POST /scan/output/detailed` to scan model output with request-provided output scanners. Send `prompt`, `output`, `output_scanners`, and optional `fail_fast` in the request body.
+Use `POST /scan/output/detailed/stream` to scan model output with request-provided output scanners. Send `prompt`, `output`, `output_scanners`, and optional `fail_fast` in the request body.
 
-The response mirrors prompt scanning but returns `sanitized_output`.
+The endpoint streams the same SSE event sequence as prompt scanning. The final `complete` event data mirrors prompt scanning but returns `sanitized_output`.
+
+The existing `POST /scan/output/detailed` endpoint remains available with its original JSON response for compatibility, but is deprecated in favor of the SSE endpoint.
 
 ## Scanner Cache
 
