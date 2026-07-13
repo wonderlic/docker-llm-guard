@@ -47,7 +47,7 @@ Copy `.env.example` to `.env`, set `AUTH_TOKEN`, then run:
 docker compose up --build
 ```
 
-The API listens on `http://localhost:8000` by default. Local Phoenix runs on `http://localhost:6006`.
+The API listens on `http://localhost:8000` by default.
 
 Do not commit `.env`; it can contain API keys and auth tokens.
 
@@ -58,25 +58,16 @@ The custom FastAPI app exports OpenTelemetry traces when `TRACING_EXPORTER=otel_
 ```sh
 TRACING_EXPORTER=otel_http
 TRACING_OTEL_ENDPOINT=https://otel-collector.example.test/v1/traces
-OTEL_EXPORTER_OTLP_TRACES_HEADERS=x-project-name=llm-guard
+OTEL_EXPORTER_OTLP_TRACES_HEADERS=authorization=Bearer%20your-token
 ```
 
-The app sends OTLP/HTTP traces to `TRACING_OTEL_ENDPOINT` and uses any `OTEL_EXPORTER_OTLP_TRACES_HEADERS` value as-is. Set endpoint-specific headers explicitly for Phoenix Cloud, Arize AX, or any other OTLP collector.
+The app sends OTLP/HTTP traces to `TRACING_OTEL_ENDPOINT` and uses any `OTEL_EXPORTER_OTLP_TRACES_HEADERS` value as-is. Set endpoint-specific headers explicitly for your OTLP collector.
 
 If `TRACING_OTEL_ENDPOINT` is unset, the underlying OTEL exporter uses its own default endpoint. Set `TRACING_EXPORTER=none` to disable tracing.
 
 The app emits FastAPI request spans plus scanner-level spans with scanner direction, scanner type, config fingerprint, cache hit, validity, risk score, and changed status. Prompt and output text are not added to span attributes.
 
 To verify inbound trace context during debugging, set `TRACE_HEADER_DEBUG=true`. The app will print one JSON line per request with the received `traceparent`, the active OTEL trace/span IDs, and presence flags for `tracestate` and `baggage`. It does not print `tracestate` or `baggage` values.
-
-For Phoenix Cloud, set these in `.env`:
-
-```sh
-TRACING_OTEL_ENDPOINT=https://app.phoenix.arize.com/s/your-space-name/v1/traces
-OTEL_EXPORTER_OTLP_TRACES_HEADERS=authorization=Bearer%20your-phoenix-api-key,x-project-name=llm-guard
-```
-
-Use the Hostname from Phoenix Cloud Settings. The generic `https://app.phoenix.arize.com/v1/traces` endpoint will not route to your space. Spaces in the Authorization header must be URL-encoded as `%20`; otherwise Phoenix may return `401`.
 
 For Arize AX, set these in `.env`:
 
