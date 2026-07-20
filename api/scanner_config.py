@@ -5,6 +5,26 @@ import json
 from typing import Any
 
 
+# Presidio/Relevance/FactualConsistency values are explicit llm-guard 0.3.16
+# defaults. All values are nonzero to keep risk normalization well-defined.
+STABLE_SCORING_PARAMS: dict[str, tuple[str, float]] = {
+    "Anonymize": ("threshold", 0.5),
+    "BanCompetitors": ("threshold", 1.0),
+    "BanTopics": ("threshold", 1.0),
+    "Bias": ("threshold", 1.0),
+    "Code": ("threshold", 1.0),
+    "FactualConsistency": ("minimum_score", 0.75),
+    "Gibberish": ("threshold", 1.0),
+    "Language": ("threshold", 1.0),
+    "MaliciousURLs": ("threshold", 1.0),
+    "PromptInjection": ("threshold", 1.0),
+    "Relevance": ("threshold", 0.5),
+    "Sensitive": ("threshold", 0.5),
+    "Sentiment": ("threshold", -1.0),
+    "Toxicity": ("threshold", 1.0),
+}
+
+
 DIRECTION_AGNOSTIC_SCANNER_TYPES = frozenset(
     {
         "BanCode",
@@ -75,11 +95,23 @@ def canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
+def normalized_scanner_params(scanner_config: Any) -> dict[str, Any]:
+    params = dict(scanner_config.params or {})
+    params.pop("threshold", None)
+    params.pop("minimum_score", None)
+    stable_scoring_param = STABLE_SCORING_PARAMS.get(scanner_config.type)
+    if stable_scoring_param is not None:
+        name, value = stable_scoring_param
+        params[name] = value
+
+    return params
+
+
 def scanner_config_payload(direction: str, scanner_config: Any) -> dict[str, Any]:
     scanner_type = scanner_config.type
     payload = {
         "type": scanner_type,
-        "params": scanner_config.params or {},
+        "params": normalized_scanner_params(scanner_config),
     }
     if scanner_type not in DIRECTION_AGNOSTIC_SCANNER_TYPES:
         payload["direction"] = direction
@@ -88,7 +120,7 @@ def scanner_config_payload(direction: str, scanner_config: Any) -> dict[str, Any
 
 
 def scanner_instantiation_params(scanner_config: Any) -> dict[str, Any]:
-    params = dict(scanner_config.params or {})
+    params = normalized_scanner_params(scanner_config)
     if scanner_config.type == "BanTopics":
         params.pop("multi_label", None)
 

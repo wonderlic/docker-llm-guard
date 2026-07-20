@@ -8,6 +8,7 @@ from api.scanner_config import (
     ban_topics_multi_label,
     direction_supported_scanner_configs,
     duplicate_scanner_type,
+    request_config_fingerprint,
     scanner_config_fingerprint,
     scanner_instantiation_params,
     scanner_supported_in_direction,
@@ -33,13 +34,44 @@ class ScannerConfigTests(unittest.TestCase):
             scanner_config_fingerprint("output", config),
         )
 
-    def test_direction_agnostic_params_change_fingerprint(self) -> None:
+    def test_policy_thresholds_do_not_change_scanner_fingerprint(self) -> None:
         input_config = scanner_config("BanTopics", {"topics": ["policy"], "threshold": 0.8})
         output_config = scanner_config("BanTopics", {"topics": ["policy"], "threshold": 0.7})
 
-        self.assertNotEqual(
+        self.assertEqual(
             scanner_config_fingerprint("input", input_config),
             scanner_config_fingerprint("output", output_config),
+        )
+
+        low_minimum = scanner_config("FactualConsistency", {"minimum_score": 0.2})
+        high_minimum = scanner_config("FactualConsistency", {"minimum_score": 0.95})
+        self.assertEqual(
+            scanner_config_fingerprint("output", low_minimum),
+            scanner_config_fingerprint("output", high_minimum),
+        )
+
+    def test_policy_thresholds_do_not_change_request_fingerprint(self) -> None:
+        first = [
+            scanner_config("Toxicity", {"threshold": 0.2, "match_type": "sentence"}),
+            scanner_config("FactualConsistency", {"minimum_score": 0.4}),
+        ]
+        second = [
+            scanner_config("Toxicity", {"threshold": 0.9, "match_type": "sentence"}),
+            scanner_config("FactualConsistency", {"minimum_score": 0.95}),
+        ]
+
+        self.assertEqual(
+            request_config_fingerprint("output", first),
+            request_config_fingerprint("output", second),
+        )
+
+    def test_non_policy_params_change_fingerprint(self) -> None:
+        full = scanner_config("Toxicity", {"threshold": 0.8, "match_type": "full"})
+        sentence = scanner_config("Toxicity", {"threshold": 0.8, "match_type": "sentence"})
+
+        self.assertNotEqual(
+            scanner_config_fingerprint("input", full),
+            scanner_config_fingerprint("input", sentence),
         )
 
     def test_ban_topics_multi_label_changes_fingerprint(self) -> None:
@@ -103,8 +135,34 @@ class ScannerConfigTests(unittest.TestCase):
 
         self.assertEqual(
             scanner_instantiation_params(config),
-            {"topics": ["policy"], "threshold": 0.8},
+            {"topics": ["policy"], "threshold": 1.0},
         )
+
+    def test_policy_thresholds_produce_identical_stable_instantiation_params(self) -> None:
+        cases = [
+            ("BanCompetitors", "threshold", 1.0),
+            ("BanTopics", "threshold", 1.0),
+            ("Bias", "threshold", 1.0),
+            ("Code", "threshold", 1.0),
+            ("Gibberish", "threshold", 1.0),
+            ("Language", "threshold", 1.0),
+            ("MaliciousURLs", "threshold", 1.0),
+            ("PromptInjection", "threshold", 1.0),
+            ("Toxicity", "threshold", 1.0),
+            ("Sentiment", "threshold", -1.0),
+            ("Anonymize", "threshold", 0.5),
+            ("Sensitive", "threshold", 0.5),
+            ("Relevance", "threshold", 0.5),
+            ("FactualConsistency", "minimum_score", 0.75),
+        ]
+        for scanner_type, param_name, stable_value in cases:
+            with self.subTest(scanner_type=scanner_type):
+                low = scanner_config(scanner_type, {param_name: 0.1, "use_onnx": True})
+                high = scanner_config(scanner_type, {param_name: 0.9, "use_onnx": True})
+
+                expected = {param_name: stable_value, "use_onnx": True}
+                self.assertEqual(scanner_instantiation_params(low), expected)
+                self.assertEqual(scanner_instantiation_params(high), expected)
 
     def test_ban_topics_multi_label_defaults_false(self) -> None:
         self.assertFalse(ban_topics_multi_label(scanner_config("BanTopics")))

@@ -36,6 +36,7 @@ class GuardrailTraceTests(unittest.TestCase):
                 cache_hit=True,
                 is_valid=False,
                 risk_score=0.82,
+                raw_score=0.91,
                 changed=False,
                 threshold=0.75,
                 details={
@@ -75,6 +76,7 @@ class GuardrailTraceTests(unittest.TestCase):
         self.assertFalse(attributes["guardrail.scanner.0.valid"])
         self.assertTrue(attributes["guardrail.scanner.0.blocked"])
         self.assertEqual(attributes["guardrail.scanner.0.risk_score"], 0.82)
+        self.assertEqual(attributes["guardrail.scanner.0.raw_score"], 0.91)
         self.assertEqual(attributes["guardrail.scanner.0.threshold"], 0.75)
         self.assertEqual(attributes["guardrail.scanner.0.effective_score"], 0.91)
         self.assertEqual(attributes["guardrail.scanner.0.matched_topic"], "recipes")
@@ -83,6 +85,7 @@ class GuardrailTraceTests(unittest.TestCase):
 
         payload = json.loads(str(attributes["guardrail.scanners_json"]))
         self.assertEqual(payload[0]["name"], "BanTopics")
+        self.assertEqual(payload[0]["raw_score"], 0.91)
         self.assertEqual(payload[0]["matched_topic"], "recipes")
         self.assertIsNone(payload[1]["matched_topic"])
 

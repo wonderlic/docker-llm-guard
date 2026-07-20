@@ -61,11 +61,11 @@ TRACING_OTEL_ENDPOINT=https://otel-collector.example.test/v1/traces
 OTEL_EXPORTER_OTLP_TRACES_HEADERS=authorization=Bearer%20your-token
 ```
 
-The app sends OTLP/HTTP traces to `TRACING_OTEL_ENDPOINT` and uses any `OTEL_EXPORTER_OTLP_TRACES_HEADERS` value as-is. Set endpoint-specific headers explicitly for your OTLP collector.
+The app accepts `TRACING_OTEL_ENDPOINT` or the standard `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`. It also accepts `OTEL_EXPORTER_OTLP_ENDPOINT` as a base URL and appends `/v1/traces`. Any `OTEL_EXPORTER_OTLP_TRACES_HEADERS` value is used as-is.
 
-If `TRACING_OTEL_ENDPOINT` is unset, the underlying OTEL exporter uses its own default endpoint. Set `TRACING_EXPORTER=none` to disable tracing.
+OTLP tracing is disabled when no endpoint is configured, preventing the exporter from silently falling back to `http://localhost:4318/v1/traces`. Set `TRACING_EXPORTER=none` to disable tracing explicitly.
 
-The app emits FastAPI request spans plus scanner-level spans with scanner direction, scanner type, config fingerprint, cache hit, validity, risk score, and changed status. Prompt and output text are not added to span attributes.
+The app emits FastAPI request spans plus scanner-level spans with scanner direction, scanner type, config fingerprint, cache hit, validity, risk score, raw score when available, and changed status. Prompt and output text are not added to span attributes.
 
 To verify inbound trace context during debugging, set `TRACE_HEADER_DEBUG=true`. The app will print one JSON line per request with the received `traceparent`, the active OTEL trace/span IDs, and presence flags for `tracestate` and `baggage`. It does not print `tracestate` or `baggage` values.
 
@@ -129,7 +129,7 @@ Use `POST /scan/prompt/detailed/stream` to scan a prompt with request-provided i
 
 The endpoint streams `text/event-stream` responses. It emits `start`, `progress`, `scanner_start`, `scanner_complete`, and final `complete` events. A `progress` event with `status: "queued"` is sent before each scanner starts. Once the scanner is running, `scanner_start` and periodic `progress` events use `status: "running"`. During long scanner calls, `progress` events are emitted every 15 seconds with queue position details: `current`, `total`, `remaining`, `direction`, `instance_id`, `type`, and `cache_hit`.
 
-The final `complete` event data includes the final `sanitized_prompt`, an overall `is_valid` flag, an overall `risk_score`, an active request `config_fingerprint`, and a `scanners` array. Each scanner result includes `index`, `instance_id`, `type`, `config_fingerprint`, `cache_hit`, `is_valid`, `risk_score`, `changed`, and `threshold` when available.
+The final `complete` event data includes the final `sanitized_prompt`, an overall `is_valid` flag, an overall `risk_score`, an active request `config_fingerprint`, and a `scanners` array. Each scanner result includes `index`, `instance_id`, `type`, `config_fingerprint`, `cache_hit`, `is_valid`, `risk_score`, nullable `raw_score`, `changed`, and `threshold` when available. `raw_score` is the scanner's unnormalized decision metric and does not depend on `is_valid` or `risk_score`.
 
 The existing `POST /scan/prompt/detailed` endpoint remains available with its original JSON response for compatibility, but is deprecated in favor of the SSE endpoint.
 
@@ -156,6 +156,8 @@ Inactive scanner configs for the other direction can be included in a request an
 Direction-agnostic scanner types, such as `BanTopics`, `Toxicity`, `Language`, and `Gibberish`, are fingerprinted from `type` and `params` and cached once across input and output scans when those params match. If the same scanner type arrives later with different params, that direction's cache set is updated to the new fingerprint.
 
 Direction-specific scanner types are fingerprinted from scanner direction, `type`, and `params`, so they remain cached separately.
+
+Request `threshold` and `minimum_score` values are policy inputs and do not affect scanner fingerprints or model construction. The service uses stable, nonzero scoring thresholds so cached scanners produce complete raw decision scores; callers should apply policy thresholds to each result's `raw_score`.
 
 The cache keeps exactly the scanner set from the most recent prompt scan and the scanner set from the most recent output scan. A later prompt scan replaces only the previous prompt scanner set, and a later output scan replaces only the previous output scanner set. Repeated requests with the same scanner config reuse those scanner instances and return `cache_hit: true`.
 

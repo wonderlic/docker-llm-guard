@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 from typing import Any
@@ -16,6 +17,22 @@ from api.telemetry_logs import suppress_transient_span_export_errors
 telemetry_configured = False
 telemetry_lock = threading.Lock()
 tracer = trace.get_tracer("api.scanners")
+logger = logging.getLogger(__name__)
+
+
+def tracing_endpoint() -> str | None:
+    endpoint = (
+        os.environ.get("TRACING_OTEL_ENDPOINT", "").strip()
+        or os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "").strip()
+    )
+    if endpoint:
+        return endpoint
+
+    base_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    if base_endpoint:
+        return f"{base_endpoint.rstrip('/')}/v1/traces"
+
+    return None
 
 
 def configure_tracing() -> None:
@@ -23,8 +40,17 @@ def configure_tracing() -> None:
 
     exclude_health_check_tracing()
 
-    tracing_exporter = os.environ.get("TRACING_EXPORTER", "console")
-    if tracing_exporter.lower() in {"", "none", "disabled"}:
+    tracing_exporter = os.environ.get("TRACING_EXPORTER", "none").strip().lower()
+    if tracing_exporter in {"", "none", "disabled"}:
+        return
+
+    endpoint = tracing_endpoint()
+    if tracing_exporter == "otel_http" and endpoint is None:
+        logger.warning(
+            "OTLP tracing is disabled because no tracing endpoint is configured. "
+            "Set TRACING_OTEL_ENDPOINT, OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, "
+            "or OTEL_EXPORTER_OTLP_ENDPOINT."
+        )
         return
 
     with telemetry_lock:
@@ -32,7 +58,6 @@ def configure_tracing() -> None:
             return
 
         app_name = os.environ.get("APP_NAME", "Detailed LLM Guard API")
-        tracing_endpoint = os.environ.get("TRACING_OTEL_ENDPOINT") or None
         if tracing_exporter == "otel_http":
             suppress_transient_span_export_errors()
 
@@ -40,7 +65,7 @@ def configure_tracing() -> None:
             app_name,
             TracingConfig(
                 exporter=tracing_exporter,
-                endpoint=tracing_endpoint,
+                endpoint=endpoint,
             ),
             None,
         )

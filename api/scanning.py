@@ -8,6 +8,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from api.guardrail_trace import update_scanner_trace_title
 from api.models import ScannerInvocation, ScannerResult
+from api.raw_scores import RawScoreCapture, complete_raw_score
 from api.scanner_config import shares_scanner_across_directions
 from api.telemetry import tracer
 
@@ -16,6 +17,8 @@ def set_scanner_span_attributes(span: Any, scanner_result: ScannerResult) -> Non
     span.set_attribute("scanner.is_valid", scanner_result.is_valid)
     span.set_attribute("scanner.blocked", not scanner_result.is_valid)
     span.set_attribute("scanner.risk_score", scanner_result.risk_score)
+    if scanner_result.raw_score is not None:
+        span.set_attribute("scanner.raw_score", scanner_result.raw_score)
     if scanner_result.threshold is not None:
         span.set_attribute("scanner.threshold", scanner_result.threshold)
 
@@ -160,12 +163,38 @@ def scan_input_scanner(invocation: ScannerInvocation, prompt: str) -> tuple[str,
                         prompt,
                         multi_label=invocation.multi_label,
                     )
+                    raw_score = finite_float_or_none(details["effective_score"])
                 elif shares_scanner_across_directions(invocation.scanner_type):
-                    sanitized_prompt, is_valid, risk_score = shared_inner_scanner(scanner).scan(prompt)
+                    inner_scanner = shared_inner_scanner(scanner)
+                    capture = RawScoreCapture(invocation.scanner_type, inner_scanner)
+                    capture.install()
+                    try:
+                        sanitized_prompt, is_valid, risk_score = inner_scanner.scan(prompt)
+                    finally:
+                        capture.uninstall()
                     details = {}
+                    raw_score = complete_raw_score(
+                        invocation.scanner_type,
+                        inner_scanner,
+                        capture.results,
+                        prompt,
+                        sanitized_prompt,
+                    )
                 else:
-                    sanitized_prompt, is_valid, risk_score = scanner.scan(prompt)
+                    capture = RawScoreCapture(invocation.scanner_type, scanner)
+                    capture.install()
+                    try:
+                        sanitized_prompt, is_valid, risk_score = scanner.scan(prompt)
+                    finally:
+                        capture.uninstall()
                     details = {}
+                    raw_score = complete_raw_score(
+                        invocation.scanner_type,
+                        scanner,
+                        capture.results,
+                        prompt,
+                        sanitized_prompt,
+                    )
 
             is_valid = bool(is_valid)
             risk_score = finite_risk_score(risk_score, is_valid)
@@ -178,6 +207,7 @@ def scan_input_scanner(invocation: ScannerInvocation, prompt: str) -> tuple[str,
                 cache_hit=invocation.cache_hit,
                 is_valid=is_valid,
                 risk_score=risk_score,
+                raw_score=raw_score,
                 changed=sanitized_prompt != prompt,
                 threshold=threshold,
                 details=details,
@@ -197,6 +227,7 @@ def scan_input_scanner(invocation: ScannerInvocation, prompt: str) -> tuple[str,
                 cache_hit=invocation.cache_hit,
                 is_valid=False,
                 risk_score=1.0,
+                raw_score=None,
                 changed=False,
                 threshold=threshold,
                 error=str(exc),
@@ -231,12 +262,38 @@ def scan_output_scanner(
                         output,
                         multi_label=invocation.multi_label,
                     )
+                    raw_score = finite_float_or_none(details["effective_score"])
                 elif shares_scanner_across_directions(invocation.scanner_type):
-                    sanitized_output, is_valid, risk_score = shared_inner_scanner(scanner).scan(output)
+                    inner_scanner = shared_inner_scanner(scanner)
+                    capture = RawScoreCapture(invocation.scanner_type, inner_scanner)
+                    capture.install()
+                    try:
+                        sanitized_output, is_valid, risk_score = inner_scanner.scan(output)
+                    finally:
+                        capture.uninstall()
                     details = {}
+                    raw_score = complete_raw_score(
+                        invocation.scanner_type,
+                        inner_scanner,
+                        capture.results,
+                        output,
+                        sanitized_output,
+                    )
                 else:
-                    sanitized_output, is_valid, risk_score = scanner.scan(prompt, output)
+                    capture = RawScoreCapture(invocation.scanner_type, scanner)
+                    capture.install()
+                    try:
+                        sanitized_output, is_valid, risk_score = scanner.scan(prompt, output)
+                    finally:
+                        capture.uninstall()
                     details = {}
+                    raw_score = complete_raw_score(
+                        invocation.scanner_type,
+                        scanner,
+                        capture.results,
+                        output,
+                        sanitized_output,
+                    )
 
             is_valid = bool(is_valid)
             risk_score = finite_risk_score(risk_score, is_valid)
@@ -249,6 +306,7 @@ def scan_output_scanner(
                 cache_hit=invocation.cache_hit,
                 is_valid=is_valid,
                 risk_score=risk_score,
+                raw_score=raw_score,
                 changed=sanitized_output != output,
                 threshold=threshold,
                 details=details,
@@ -268,6 +326,7 @@ def scan_output_scanner(
                 cache_hit=invocation.cache_hit,
                 is_valid=False,
                 risk_score=1.0,
+                raw_score=None,
                 changed=False,
                 threshold=threshold,
                 error=str(exc),
