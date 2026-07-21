@@ -59,6 +59,7 @@ class ScannerResult(BaseModel):
     cache_hit: bool
     is_valid: bool
     risk_score: float
+    raw_score: float | None = None
     changed: bool
     threshold: float | None = None
     details: dict[str, Any] = Field(default_factory=dict)

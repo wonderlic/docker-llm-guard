@@ -26,6 +26,7 @@ def scanner_trace_record(stage: str, scanner_result: Any) -> dict[str, Any]:
         "valid": scanner_result.is_valid,
         "blocked": not scanner_result.is_valid,
         "risk_score": scanner_result.risk_score,
+        "raw_score": getattr(scanner_result, "raw_score", None),
         "threshold": getattr(scanner_result, "threshold", None),
         "effective_score": effective_score,
         "matched_topic": matched_topic or None,
@@ -72,6 +73,8 @@ def guardrail_trace_attributes(
         attributes[f"{prefix}.valid"] = record["valid"]
         attributes[f"{prefix}.blocked"] = record["blocked"]
         attributes[f"{prefix}.risk_score"] = record["risk_score"]
+        if record["raw_score"] is not None:
+            attributes[f"{prefix}.raw_score"] = record["raw_score"]
         if record["threshold"] is not None:
             attributes[f"{prefix}.threshold"] = record["threshold"]
         if record["effective_score"] is not None:
